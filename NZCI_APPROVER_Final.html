@@ -317,27 +317,110 @@ function buildCOADOM(p,b){
   const approverSig = localStorage.getItem(LS_APPROVER_SIG)||'';
   const approverName = document.getElementById('approverName').value || '';
   const div = document.createElement('div');
-  div.style.width='820px'; div.style.padding='24px'; div.style.background='white'; div.style.fontFamily='Arial,Helvetica,sans-serif';
-  // Header
-  const head = document.createElement('div'); head.innerHTML = `<div style='display:flex;align-items:center;gap:12px'>${logo?`<img src='${logo}' style='height:64px'/>`:''}<div><h2 style='margin:0'>New Zealand Creamery Inc.,</h2><div><h2 style='margin:0'>Certificate of Analysis</h2><div style='color:#555'>Product: <strong>${p.name}</strong> · Batch: <strong>${b.batch}</strong></div><div style='color:#555'>Production Date: ${b.date||'-'} · Analysis Date: ${b.analysisDate||'-'}</div></div></div><hr style='margin:12px 2'/>`;
+  div.style.width='820px'; 
+  div.style.padding='24px'; 
+  div.style.background='white'; 
+  div.style.fontFamily='Arial,Helvetica,sans-serif';
+
+  // --- Header ---
+  const head = document.createElement('div'); 
+  head.style.textAlign = 'center';
+  head.innerHTML = `
+    ${logo?`<img src='${logo}' style='height:64px;display:block;margin:0 auto 8px auto'/>`:''}
+    <h2 style='margin:0;font-size:16pt;font-weight:bold;'>NEW ZEALAND CREAMERY INC.</h2>
+    <h2 style='margin:0;font-size:14pt;'>CERTIFICATE OF ANALYSIS</h2>
+    <hr style='margin:12px 0'/>
+  `;
   div.appendChild(head);
-  // Spec table
-  const tbl = document.createElement('table'); tbl.style.width='100%'; tbl.style.borderCollapse='collapse';
-  const trh = document.createElement('tr'); trh.innerHTML = `<th style='border:1px solid #ddd;padding:6px'>Parameter</th><th style='border:1px solid #ddd;padding:6px'>Standard</th><th style='border:1px solid #ddd;padding:6px'>Result</th><th style='border:1px solid #ddd;padding:6px'>Remarks</th>`; tbl.appendChild(trh);
+
+  // --- Product / Batch Details (separate section under header) ---
+  const details = document.createElement('div');
+  details.style.margin = '8px 0 16px 0';
+  details.style.fontSize = '11pt';
+  details.style.color = '#333';
+  details.innerHTML = `
+    <div><strong>Product:</strong> ${p.name}</div>
+    <div><strong>Batch:</strong> ${b.batch}</div>
+    <div><strong>Production Date:</strong> ${b.date||'-'}</div>
+    <div><strong>Analysis Date:</strong> ${b.analysisDate||'-'}</div>
+  `;
+  div.appendChild(details);
+
+  // --- Parameter Table ---
+  const tbl = document.createElement('table'); 
+  tbl.style.width='100%'; 
+  tbl.style.borderCollapse='collapse';
+  const trh = document.createElement('tr'); 
+  trh.innerHTML = `<th style='border:1px solid #ddd;padding:6px'>Parameter</th>
+                   <th style='border:1px solid #ddd;padding:6px'>Standard</th>
+                   <th style='border:1px solid #ddd;padding:6px'>Result</th>
+                   <th style='border:1px solid #ddd;padding:6px'>Remarks</th>`;
+  tbl.appendChild(trh);
   for(const prm of p.parameters){
     const v = b.results?.[prm.name];
     const remark = (v===undefined||v==='')?'-':((v>=prm.min && v<=prm.max)?'PASS':'FAIL');
-    const tr = document.createElement('tr'); tr.innerHTML = `<td style='border:1px solid #ddd;padding:6px'>${prm.name}</td><td style='border:1px solid #ddd;padding:6px'>${prm.min} – ${prm.max} ${prm.unit||''}</td><td style='border:1px solid #ddd;padding:6px'>${v??''}</td><td style='border:1px solid #ddd;padding:6px'>${remark}</td>`;
+    const tr = document.createElement('tr'); 
+    tr.innerHTML = `<td style='border:1px solid #ddd;padding:6px'>${prm.name}</td>
+                    <td style='border:1px solid #ddd;padding:6px'>${prm.min} – ${prm.max} ${prm.unit||''}</td>
+                    <td style='border:1px solid #ddd;padding:6px'>${v??''}</td>
+                    <td style='border:1px solid #ddd;padding:6px'>${remark}</td>`;
     tbl.appendChild(tr);
   }
   div.appendChild(tbl);
-  // Remarks (batch)
-  if(b.remarks){ const rem=document.createElement('div'); rem.style.marginTop='12px'; rem.style.color='#333'; rem.innerHTML = `<strong>Remarks:</strong> ${b.remarks}`; div.appendChild(rem); }
-  // Signatures
-  const signWrap = document.createElement('div'); signWrap.style.display='flex'; signWrap.style.justifyContent='space-between'; signWrap.style.marginTop='18px';
-  const left = document.createElement('div'); left.innerHTML = `<div style='font-weight:700'>Analyst</div>`; if(b.signature){ const img=document.createElement('img'); img.src=b.signature; img.style.maxWidth='220px'; img.style.display='block'; img.style.margin='6px 0'; left.appendChild(img);} left.innerHTML += `<div>${b.analyst||'-'}</div>`; signWrap.appendChild(left);
-  const right = document.createElement('div'); right.innerHTML = `<div style='font-weight:700'>Approver</div>`; if(approverSig){ const img=document.createElement('img'); img.src=approverSig; img.style.maxWidth='220px'; img.style.display='block'; img.style.margin='6px 0'; right.appendChild(img);} right.innerHTML += `<div>${approverName||'-'}</div>`; signWrap.appendChild(right);
+
+  // --- Remarks if any ---
+  if(b.remarks){ 
+    const rem=document.createElement('div'); 
+    rem.style.marginTop='12px'; 
+    rem.style.color='#333'; 
+    rem.innerHTML = `<strong>Remarks:</strong> ${b.remarks}`; 
+    div.appendChild(rem); 
+  }
+
+  // --- Signatures ---
+  const signWrap = document.createElement('div'); 
+  signWrap.style.display='flex'; 
+  signWrap.style.justifyContent='space-between'; 
+  signWrap.style.marginTop='18px';
+  const left = document.createElement('div'); 
+  left.innerHTML = `<div style='font-weight:700'>Analyst</div>`; 
+  if(b.signature){ 
+    const img=document.createElement('img'); 
+    img.src=b.signature; 
+    img.style.maxWidth='220px'; 
+    img.style.display='block'; 
+    img.style.margin='6px 0'; 
+    left.appendChild(img);
+  } 
+  left.innerHTML += `<div>${b.analyst||'-'}</div>`; 
+  signWrap.appendChild(left);
+
+  const right = document.createElement('div'); 
+  right.innerHTML = `<div style='font-weight:700'>Approver</div>`; 
+  if(approverSig){ 
+    const img=document.createElement('img'); 
+    img.src=approverSig; 
+    img.style.maxWidth='220px'; 
+    img.style.display='block'; 
+    img.style.margin='6px 0'; 
+    right.appendChild(img);
+  } 
+  right.innerHTML += `<div>${approverName||'-'}</div>`; 
+  signWrap.appendChild(right);
+
   div.appendChild(signWrap);
+
+  // --- Footer with company address ---
+  const footer = document.createElement('div');
+  footer.style.marginTop = '24px';
+  footer.style.fontSize = '10pt';
+  footer.style.textAlign = 'center';
+  footer.style.color = '#444';
+  footer.innerHTML = "#101 CARMELRAY BLVD., CARMELRAY INDUSTRIAL PARK 1, CANLUBANG, CALAMBA, LAGUNA, PHILIPPINES<br/>" +
+                     "TEL NOS. 895-0853 / 890-4191 / FAX 895-9675 / 890-4193<br/>" +
+                     "THIS IS SYSTEM GENERATED";
+  div.appendChild(footer);
+
   return div;
 }
 
