@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Analyst QA System — Per-Product Multi-Parameter</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial}
+    .status-console{height:140px;overflow:auto;background:#0b1220;color:#e6eef8;padding:10px;border-radius:10px}
+    .log-pass{color:#16a34a;font-weight:600}
+    .log-fail{color:#ef4444;font-weight:600}
+    .log-info{color:#f59e0b;font-weight:600}
+    details>summary{cursor:pointer}
+    .sig-preview{max-height:70px;max-width:240px;object-fit:contain;border:1px dashed #ddd;padding:4px;background:#fff}
+    input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800 p-6">
+  <div class="max-w-7xl mx-auto">
+    <header class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold">Analyst QA System</h1>
+        <p class="text-sm text-gray-600">Per-product multi-parameter input & save · Multi-batch · Daily dashboard · Signature upload · LocalStorage</p>
+      </div>
+      <div class="flex gap-2">
+        <button id="btnExportDB" class="px-3 py-2 bg-green-600 text-white rounded">Export Database (Excel)</button>
+        <button id="btnExportJSON" class="px-3 py-2 bg-indigo-600 text-white rounded">Export JSON</button>
+        <label class="px-3 py-2 bg-gray-200 rounded cursor-pointer">Import JSON<input id="importJSON" type="file" accept="application/json" class="hidden"></label>
+        <button id="btnExportAudit" class="px-3 py-2 bg-yellow-500 text-gray-900 rounded">Export Audit Trail</button>
+        <button id="btnReset" class="px-3 py-2 bg-red-600 text-white rounded">Reset DB</button>
+      </div>
+    </header>
+
+    <main class="grid grid-cols-3 gap-6">
+      <!-- Left column: Adders + Console -->
+      <section class="space-y-4">
+        <div class="bg-white rounded-xl shadow p-4">
+          <h2 class="font-semibold mb-2">Add Product</h2>
+          <div class="flex gap-2">
+            <input id="inpProductName" class="flex-1 border rounded p-2" placeholder="Product name" />
+            <button id="btnAddProduct" class="px-3 py-2 bg-blue-600 text-white rounded">Add</button>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow p-4">
+          <h2 class="font-semibold mb-2">Status Console</h2>
+          <div id="console" class="status-console"></div>
+          <div class="mt-2 text-xs text-gray-500">✔ Green = Success · ⚠ Yellow = Info · ✖ Red = Error</div>
+        </div>
+      </section>
+
+      <!-- Right: Dashboard + Products -->
+      <section class="col-span-2 space-y-4">
+        <div class="bg-white rounded-xl shadow p-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="font-semibold text-lg">Dashboard</h2>
+              <p class="text-sm text-gray-500">Samples per day & Pass/Fail summary (based on production date)</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <input id="search" class="border rounded p-2" placeholder="Search product or parameter..." />
+              <button id="btnRefresh" class="px-3 py-2 bg-gray-200 rounded">Refresh</button>
+            </div>
+          </div>
+          <div class="grid grid-cols-4 gap-3 mt-3">
+            <div class="p-3 border rounded"><div class="text-xs text-gray-500">Products</div><div id="metricProducts" class="text-2xl font-bold">0</div></div>
+            <div class="p-3 border rounded"><div class="text-xs text-gray-500">Parameters</div><div id="metricParams" class="text-2xl font-bold">0</div></div>
+            <div class="p-3 border rounded"><div class="text-xs text-gray-500">Batches</div><div id="metricBatches" class="text-2xl font-bold">0</div></div>
+            <div class="p-3 border rounded"><div class="text-xs text-gray-500">Pass / Fail (batches)</div><div id="metricPassFail" class="text-2xl font-bold">0 / 0</div></div>
+          </div>
+          <div id="dailyTableWrap" class="mt-4"></div>
+        </div>
+
+        <div id="productsWrap" class="space-y-3"></div>
+      </section>
+    </main>
+
+    <footer class="mt-6 text-sm text-gray-500">Generated: <span id="generatedTime"></span></footer>
+  </div>
+
+<script>
+// ---------------- Core State & Helpers ----------------
+const LS_KEY = 'qa_analyst_db_v2';
+let DB = loadDB();
+
+function loadDB(){
+  try{ return JSON.parse(localStorage.getItem(LS_KEY)) || { products: [], audit: [] }; }catch{ return { products: [], audit: [] }; }
+}
+function saveDB(note){
+  localStorage.setItem(LS_KEY, JSON.stringify(DB));
+  if(note) log('info', note);
+  renderAll();
+}
+function now(){ return new Date().toLocaleString(); }
+function log(type, msg){
+  const c = document.getElementById('console');
+  const div = document.createElement('div');
+  const cls = type==='pass'?'log-pass':(type==='fail'?'log-fail':'log-info');
+  div.innerHTML = `<span class='text-xs text-gray-400'>[${now()}]</span> <span class='${cls}'>${msg}</span>`;
+  c.appendChild(div); c.scrollTop = c.scrollHeight;
+  DB.audit.push({ ts: new Date().toISOString(), actor:'Analyst', type, msg });
+  localStorage.setItem(LS_KEY, JSON.stringify(DB));
+}
+function uid(){ return Math.random().toString(36).slice(2,9); }
+function sanitizeFileName(s){ return String(s).replace(/[^a-z0-9_\-]+/gi,'_'); }
+
+// ---------------- CRUD Actions ----------------
+function addProduct(){
+  const name = document.getElementById('inpProductName').value.trim();
+  if(!name) return alert('Enter product name');
+  if(DB.products.some(p=>p.name.toLowerCase()===name.toLowerCase())) return alert('Product already exists');
+  DB.products.push({ id: uid(), name, parameters: [], batches: [] });
+  document.getElementById('inpProductName').value='';
+  saveDB(`Added product '${name}'`);
+}
+
+function addParameter(productId){
+  const p = DB.products.find(x=>x.id===productId); if(!p) return;
+  const name = prompt('Parameter name?'); if(!name) return;
+  const min = parseFloat(prompt('Standard Min?')); if(Number.isNaN(min)) return alert('Invalid min');
+  const max = parseFloat(prompt('Standard Max?')); if(Number.isNaN(max)) return alert('Invalid max');
+  const unit = prompt('Unit?') || '';
+  p.parameters.push({ id: uid(), name, min, max, unit });
+  saveDB(`Added parameter '${name}' to ${p.name}`);
+}
+
+function addBatch(productId){
+  const p = DB.products.find(x=>x.id===productId); if(!p) return;
+  const batch = prompt('Batch number?'); if(!batch) return;
+  const date = prompt('Production Date (YYYY-MM-DD)?'); if(!date) return;
+  const analyst = prompt('Analyst name?') || '';
+  const analysisDate = prompt('Analysis Date (YYYY-MM-DD)?') || '';
+  const remarks = prompt('Disposition?') || '';
+  p.batches.push({ id: uid(), batch, date, analysisDate, analyst, remarks, signature: null, results: {}, createdAt: new Date().toISOString() });
+  saveDB(`Added batch '${batch}' for ${p.name}`);
+}
+
+function setResult(productId, batchId, paramId, val){
+  const p = DB.products.find(x=>x.id===productId); if(!p) return;
+  const b = p.batches.find(x=>x.id===batchId); if(!b) return;
+  const prm = p.parameters.find(x=>x.id===paramId); if(!prm) return;
+  const v = (val===''||val===null)?'':parseFloat(val);
+  if(v==='') delete b.results[prm.name]; else b.results[prm.name]=v;
+  saveDB(`Set result ${prm.name}=${val} on ${p.name} / ${b.batch}`);
+}
+
+function uploadSignature(productId, batchId, file){
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const p = DB.products.find(x=>x.id===productId); if(!p) return;
+    const b = p.batches.find(x=>x.id===batchId); if(!b) return;
+    b.signature = reader.result; // base64
+    saveDB(`Uploaded analyst signature for ${p.name} / ${b.batch}`);
+  };
+  reader.readAsDataURL(file);
+}
+
+// ---------------- New: Export specific batch JSON ----------------
+function batchStatus(p, b){
+  if(!p.parameters.length) return {pass:0, fail:0, status:'n/a'};
+  let allHave = true, allPass = true;
+  for(const prm of p.parameters){
+    const v = b.results[prm.name];
+    if(v===undefined||v===''){ allHave=false; continue; }
+    if(!(v>=prm.min && v<=prm.max)) allPass=false;
+  }
+  if(!allHave) return {pass:0, fail:0, status:'partial'};
+  return allPass?{pass:1, fail:0, status:'pass'}:{pass:0, fail:1, status:'fail'};
+}
+
+function exportBatchJSON(productId, batchId){
+  const p = DB.products.find(x=>x.id===productId); if(!p) return;
+  const b = p.batches.find(x=>x.id===batchId); if(!b) return;
+
+  const status = batchStatus(p,b).status;
+  const rows = [];
+  for(const prm of p.parameters){
+    const res = (b.results[prm.name]!==undefined && b.results[prm.name]!=='' ) ? b.results[prm.name] : '';
+    const remark = (res==='') ? '' : ((res>=prm.min && res<=prm.max)?'Pass':'Fail');
+    rows.push({
+      parameter: prm.name,
+      std_min: prm.min,
+      std_max: prm.max,
+      unit: prm.unit || '',
+      result: res,
+      remark
+    });
+  }
+
+  const payload = {
+    exported_at: new Date().toISOString(),
+    product: { id: p.id, name: p.name },
+    batch: {
+      id: b.id,
+      batch_no: b.batch,
+      production_date: b.date,
+      analysis_date: b.analysisDate,
+      disposition: b.remarks,
+      analyst: b.analyst,
+      signature_base64: b.signature,
+      created_at: b.createdAt
+    },
+    summary_status: status,
+    parameters: rows
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  const fname = `batch_${sanitizeFileName(p.name)}_${sanitizeFileName(b.batch)}.json`;
+  a.href = URL.createObjectURL(blob);
+  a.download = fname;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  log('pass', `Exported ${fname}`);
+}
+
+// ---------------- Rendering ----------------
+function renderAll(){
+  renderDashboard();
+  renderProducts();
+  document.getElementById('generatedTime').textContent = now();
+}
+
+function productBatchPassFail(p,b){
+  return batchStatus(p,b);
+}
+
+function renderDashboard(){
+  const products = DB.products;
+  const metricProducts = products.length;
+  const metricParams = products.reduce((a,p)=>a+p.parameters.length,0);
+  const metricBatches = products.reduce((a,p)=>a+p.batches.length,0);
+  let pass=0, fail=0;
+  const perDay = {}; // date => {count, pass, fail}
+  for(const p of products){
+    for(const b of p.batches){
+      const stat = productBatchPassFail(p,b); pass+=stat.pass; fail+=stat.fail;
+      const d = b.date||'Unspecified';
+      if(!perDay[d]) perDay[d]={count:0, pass:0, fail:0};
+      perDay[d].count += 1;
+      perDay[d].pass += stat.pass;
+      perDay[d].fail += stat.fail;
+    }
+  }
+  document.getElementById('metricProducts').textContent = metricProducts;
+  document.getElementById('metricParams').textContent = metricParams;
+  document.getElementById('metricBatches').textContent = metricBatches;
+  document.getElementById('metricPassFail').textContent = `${pass} / ${fail}`;
+
+  // Build table
+  const wrap = document.getElementById('dailyTableWrap');
+  const days = Object.keys(perDay).sort();
+  if(!days.length){ wrap.innerHTML = '<div class="text-sm text-gray-500">No data yet.</div>'; return; }
+  let html = '<table class="w-full border mt-2"><thead><tr class="bg-gray-100">'+
+             '<th class="p-2 border">Date</th><th class="p-2 border">Samples</th><th class="p-2 border">Pass</th><th class="p-2 border">Fail</th></tr></thead><tbody>';
+  for(const d of days){ const r=perDay[d]; html += `<tr><td class="p-2 border">${d}</td><td class="p-2 border text-center">${r.count}</td><td class="p-2 border text-green-700 text-center">${r.pass}</td><td class="p-2 border text-red-600 text-center">${r.fail}</td></tr>`; }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function renderProducts(){
+  const q = document.getElementById('search').value?.trim().toLowerCase()||'';
+  const wrap = document.getElementById('productsWrap'); wrap.innerHTML='';
+  for(const p of DB.products){
+    const match = !q || p.name.toLowerCase().includes(q) || p.parameters.some(x=>x.name.toLowerCase().includes(q));
+    if(!match) continue;
+    const passCnt = p.batches.reduce((a,b)=>a+productBatchPassFail(p,b).pass,0);
+    const failCnt = p.batches.reduce((a,b)=>a+productBatchPassFail(p,b).fail,0);
+
+    const det = document.createElement('details'); det.open = true; det.className='bg-white rounded-xl shadow p-4';
+    const sum = document.createElement('summary');
+    sum.innerHTML = `<div class="flex items-center justify-between">`
+      + `<div><span class="font-semibold text-lg">${p.name}</span> <span class="text-sm text-gray-500">(${p.parameters.length} params)</span></div>`
+      + `<div class="text-sm">Pass: <span class="text-green-700 font-semibold">${passCnt}</span> / Fail: <span class="text-red-600 font-semibold">${failCnt}</span>`
+      + ` <button class='ml-3 px-2 py-1 bg-blue-600 text-white rounded text-xs' onclick="event.preventDefault(); addParameter('${p.id}')">Add Parameter</button>`
+      + ` <button class='ml-2 px-2 py-1 bg-indigo-600 text-white rounded text-xs' onclick="event.preventDefault(); addBatch('${p.id}')">Add Batch</button>`
+      + `</div></div>`;
+    det.appendChild(sum);
+
+    // Parameters table
+    const paramTbl = document.createElement('div');
+    let phtml = '<div class="mt-3"><div class="text-sm text-gray-500">Specifications</div>'+
+      '<table class="w-full border mt-1"><thead><tr class="bg-gray-100">'+
+      '<th class="p-2 border">Parameter</th><th class="p-2 border">Std Min</th><th class="p-2 border">Std Max</th><th class="p-2 border">Unit</th></tr></thead><tbody>'; 
+    for(const prm of p.parameters){ phtml += `<tr><td class="p-2 border">${prm.name}</td><td class="p-2 border text-center">${prm.min}</td><td class="p-2 border text-center">${prm.max}</td><td class="p-2 border text-center">${prm.unit||''}</td></tr>`; }
+    phtml += '</tbody></table></div>';
+    paramTbl.innerHTML = phtml; det.appendChild(paramTbl);
+
+    // Batches
+    for(const b of p.batches){
+      const card = document.createElement('div'); card.className='mt-4 p-3 border rounded';
+      card.innerHTML = `<div class='flex items-center justify-between'>
+        <div class='font-medium'>Batch <span class='font-semibold'>${b.batch}</span> — Production Date: <span class='text-gray-700'>${b.date}</span> — Analysis Date: <span class='text-gray-700'>${b.analysisDate||'-'}</span> — Analyst: <span class='text-gray-700'>${b.analyst||'-'}</span></div>
+        <div class='text-sm'>Status: ${(()=>{const s=productBatchPassFail(p,b).status; return s==='pass'?'<span class=\'text-green-700 font-semibold\'>PASS</span>':(s==='fail'?'<span class=\'text-red-600 font-semibold\'>FAIL</span>':(s==='partial'?'<span class=\'text-yellow-600 font-semibold\'>PARTIAL</span>':'—'));})()}</div>
+      </div>`;
+
+      // Results table
+      let rhtml = '<table class="w-full border mt-2"><thead><tr class="bg-gray-100">'+
+                  '<th class="p-2 border">Parameter</th><th class="p-2 border">Std Range</th><th class="p-2 border">Result</th><th class="p-2 border">Remarks</th></tr></thead><tbody>';
+      for(const prm of p.parameters){
+        const res = (b.results[prm.name]!==undefined && b.results[prm.name]!=='' ) ? b.results[prm.name] : '';
+        let remark = '';
+        if(res!=='') remark = (res>=prm.min && res<=prm.max) ? '<span class="text-green-700 font-semibold">✔ Pass</span>' : '<span class="text-red-600 font-semibold">⚠ Fail</span>';
+        rhtml += `<tr>
+          <td class='p-2 border'>${prm.name}</td>
+          <td class='p-2 border text-center'>${prm.min} – ${prm.max} ${prm.unit||''}</td>
+          <td class='p-2 border text-center'><input type='number' step='any' class='border rounded p-1 w-40' value='${res}' onchange="setResult('${p.id}','${b.id}','${prm.id}',this.value)"></td>
+          <td class='p-2 border text-center'>${remark}</td>
+        </tr>`;
+      }
+      rhtml += '</tbody></table>';
+
+      // Signature + Batch actions
+      rhtml += `<div class='mt-3 flex items-center gap-3 flex-wrap'>
+        <div class='text-sm text-gray-600'>Analyst Signature (optional):</div>
+        <label class='px-2 py-1 bg-gray-200 rounded cursor-pointer'>Upload<input type='file' accept='image/*' class='hidden' onchange="uploadSignature('${p.id}','${b.id}',this.files[0])"></label>
+        ${b.signature?`<img src='${b.signature}' class='sig-preview' alt='signature preview'/>`:''}
+        <button class='ml-auto px-2 py-1 bg-indigo-600 text-white rounded text-xs' onclick="exportBatchJSON('${p.id}','${b.id}')">Export Batch JSON</button>
+      </div>`;
+
+      card.innerHTML += `<div class='mt-1 text-sm text-gray-600'>Remarks: ${b.remarks||'-'}</div>`;
+      card.innerHTML += rhtml; det.appendChild(card);
+    }
+
+    wrap.appendChild(det);
+  }
+}
+
+// ---------------- Export / Import ----------------
+function exportExcel(){
+  const wb = XLSX.utils.book_new();
+  for(const p of DB.products){
+    const rows = [];
+    for(const b of p.batches){
+      for(const prm of p.parameters){
+        const res = b.results[prm.name];
+        const remark = (res===undefined||res==='')?'' : ((res>=prm.min && res<=prm.max)?'Pass':'Fail');
+        rows.push({ Product:p.name, Batch:b.batch, Production_Date:b.date, Analysis_Date:b.analysisDate, Analyst:b.analyst, Parameter:prm.name, Std_Min:prm.min, Std_Max:prm.max, Unit:prm.unit||'', Result:res??'', Remarks:remark, Disposition:b.remarks||'' });
+      }
+    }
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, p.name.substring(0,31));
+  }
+  XLSX.writeFile(wb, 'QA_Database.xlsx');
+  log('pass','Exported QA_Database.xlsx');
+}
+
+function exportJSON(){
+  const blob = new Blob([JSON.stringify(DB,null,2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'qa_database.json'; a.click(); URL.revokeObjectURL(a.href);
+  log('pass','Exported qa_database.json');
+}
+
+function exportAudit(){
+  const rows = [['Timestamp','Actor','Type','Message']];
+  for(const a of DB.audit){ rows.push([a.ts,a.actor,a.type,a.msg]); }
+  const ws = XLSX.utils.aoa_to_sheet(rows); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Audit'); XLSX.writeFile(wb,'QA_Audit_Trail.xlsx');
+  log('pass','Exported QA_Audit_Trail.xlsx');
+}
+
+function importJSONFile(file){
+  const reader = new FileReader();
+  reader.onload = () => {
+    try{
+      const incoming = JSON.parse(reader.result);
+      if(!incoming || typeof incoming!=='object' || !Array.isArray(incoming.products)) throw new Error('Invalid JSON format');
+      if(!incoming.audit) incoming.audit = [];
+      DB = incoming;
+      saveDB('Imported database JSON');
+    }catch(e){ alert('Import failed: '+e.message); log('fail','Import failed'); }
+  };
+  reader.readAsText(file);
+}
+
+// ---------------- New: Reset DB ----------------
+function resetDB(){
+  if(!confirm('This will clear all products, batches, results, and audit logs. Continue?')) return;
+  DB = { products: [], audit: [] };
+  localStorage.setItem(LS_KEY, JSON.stringify(DB));
+  renderAll();
+  log('info','Database reset to empty state.');
+}
+
+// ---------------- Events ----------------
+ document.getElementById('btnAddProduct').addEventListener('click', addProduct);
+ document.getElementById('btnRefresh').addEventListener('click', renderAll);
+ document.getElementById('btnExportDB').addEventListener('click', exportExcel);
+ document.getElementById('btnExportJSON').addEventListener('click', exportJSON);
+ document.getElementById('btnExportAudit').addEventListener('click', exportAudit);
+ document.getElementById('btnReset').addEventListener('click', resetDB);
+ document.getElementById('importJSON').addEventListener('change', (e)=>{ const f=e.target.files[0]; if(f) importJSONFile(f); e.target.value=''; });
+ document.getElementById('search').addEventListener('input', renderProducts);
+
+// ---------------- Init ----------------
+renderAll();
+log('info','System initialized. Ready for data entry.');
+</script>
+</body>
+</html>
