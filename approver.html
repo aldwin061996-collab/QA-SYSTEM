@@ -383,7 +383,7 @@ function buildCOADOM(p,b){
   signWrap.style.justifyContent='space-between'; 
   signWrap.style.marginTop='18px';
   const left = document.createElement('div'); 
-  left.innerHTML = `<div style='font-weight:700'>Analyst</div>`; 
+  left.innerHTML = `<div style='font-weight:700'>Analyzed by</div>`; 
   if(b.signature){ 
     const img=document.createElement('img'); 
     img.src=b.signature; 
@@ -396,7 +396,7 @@ function buildCOADOM(p,b){
   signWrap.appendChild(left);
 
   const right = document.createElement('div'); 
-  right.innerHTML = `<div style='font-weight:700'>Approver</div>`; 
+  right.innerHTML = `<div style='font-weight:700'>Approved by</div>`; 
   if(approverSig){ 
     const img=document.createElement('img'); 
     img.src=approverSig; 
