@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Analyst QA System — Per-Product Multi-Parameter</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Analyst QA System — Per-Product Multi-Parameter (Sensory Std)</title>
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
@@ -22,7 +22,7 @@
     <header class="flex items-center justify-between mb-6">
       <div>
         <h1 class="text-2xl font-bold">Analyst QA System</h1>
-        <p class="text-sm text-gray-600">Per-product multi-parameter input & save · Multi-batch · Daily dashboard · Signature upload · LocalStorage</p>
+        <p class="text-sm text-gray-600">Per-product multi-parameter input · Numeric & Sensory (text standard) · Multi-batch · Signatures · LocalStorage</p>
       </div>
       <div class="flex gap-2">
         <button id="btnExportDB" class="px-3 py-2 bg-green-600 text-white rounded">Export Database (Excel)</button>
@@ -34,7 +34,7 @@
     </header>
 
     <main class="grid grid-cols-3 gap-6">
-      <!-- Left column: Adders + Console -->
+      <!-- Left -->
       <section class="space-y-4">
         <div class="bg-white rounded-xl shadow p-4">
           <h2 class="font-semibold mb-2">Add Product</h2>
@@ -51,7 +51,7 @@
         </div>
       </section>
 
-      <!-- Right: Dashboard + Products -->
+      <!-- Right -->
       <section class="col-span-2 space-y-4">
         <div class="bg-white rounded-xl shadow p-4">
           <div class="flex items-center justify-between">
@@ -82,11 +82,11 @@
 
 <script>
 // ---------------- Core State & Helpers ----------------
-const LS_KEY = 'qa_analyst_db_v2';
+const LS_KEY = 'qa_analyst_db_v3_sensory';
 let DB = loadDB();
 
 function loadDB(){
-  try{ return JSON.parse(localStorage.getItem(LS_KEY)) || { products: [], audit: [] }; }catch{ return { products: [], audit: [] }; }
+  try{ return JSON.parse(localStorage.getItem(LS_KEY)) || { products: [], audit: [] }; } catch { return { products: [], audit: [] }; }
 }
 function saveDB(note){
   localStorage.setItem(LS_KEY, JSON.stringify(DB));
@@ -114,16 +114,25 @@ function addProduct(){
   DB.products.push({ id: uid(), name, parameters: [], batches: [] });
   document.getElementById('inpProductName').value='';
   saveDB(`Added product '${name}'`);
+  renderAll();
 }
 
 function addParameter(productId){
   const p = DB.products.find(x=>x.id===productId); if(!p) return;
-  const name = prompt('Parameter name?'); if(!name) return;
+  const name = prompt('Numeric Parameter name?'); if(!name) return;
   const min = parseFloat(prompt('Standard Min?')); if(Number.isNaN(min)) return alert('Invalid min');
   const max = parseFloat(prompt('Standard Max?')); if(Number.isNaN(max)) return alert('Invalid max');
   const unit = prompt('Unit?') || '';
-  p.parameters.push({ id: uid(), name, min, max, unit });
-  saveDB(`Added parameter '${name}' to ${p.name}`);
+  p.parameters.push({ id: uid(), name, min, max, unit, type: "numeric" });
+  saveDB(`Added numeric parameter '${name}' to ${p.name}`);
+}
+
+function addSensoryParameter(productId){
+  const p = DB.products.find(x=>x.id===productId); if(!p) return;
+  const name = prompt('Sensory Parameter name? (e.g. Color, Odor)'); if(!name) return;
+  const stdText = prompt('Standard (text)? (example: "Golden yellow", "Odorless")') || '';
+  p.parameters.push({ id: uid(), name, type: "sensory", stdText });
+  saveDB(`Added sensory parameter '${name}' with standard '${stdText}' to ${p.name}`);
 }
 
 function addBatch(productId){
@@ -137,84 +146,42 @@ function addBatch(productId){
   saveDB(`Added batch '${batch}' for ${p.name}`);
 }
 
-function setResult(productId, batchId, paramId, val){
-  const p = DB.products.find(x=>x.id===productId); if(!p) return;
-  const b = p.batches.find(x=>x.id===batchId); if(!b) return;
-  const prm = p.parameters.find(x=>x.id===paramId); if(!prm) return;
-  const v = (val===''||val===null)?'':parseFloat(val);
-  if(v==='') delete b.results[prm.name]; else b.results[prm.name]=v;
-  saveDB(`Set result ${prm.name}=${val} on ${p.name} / ${b.batch}`);
-}
-
 function uploadSignature(productId, batchId, file){
   if(!file) return;
   const reader = new FileReader();
   reader.onload = () => {
     const p = DB.products.find(x=>x.id===productId); if(!p) return;
     const b = p.batches.find(x=>x.id===batchId); if(!b) return;
-    b.signature = reader.result; // base64
-    saveDB(`Uploaded analyst signature for ${p.name} / ${b.batch}`);
+    b.signature = reader.result;
+    saveDB(`Uploaded signature for ${p.name} / ${b.batch}`);
   };
   reader.readAsDataURL(file);
 }
 
-// ---------------- New: Export specific batch JSON ----------------
+// ---------------- Results & Evaluation ----------------
+function setResult(productId, batchId, paramId, val){
+  const p = DB.products.find(x=>x.id===productId); if(!p) return;
+  const b = p.batches.find(x=>x.id===batchId); if(!b) return;
+  const prm = p.parameters.find(x=>x.id===paramId); if(!prm) return;
+  if(val==='') delete b.results[prm.name];
+  else b.results[prm.name] = val;
+  saveDB(`Set result ${prm.name}=${val} on ${p.name} / ${b.batch}`);
+}
+
 function batchStatus(p, b){
   if(!p.parameters.length) return {pass:0, fail:0, status:'n/a'};
   let allHave = true, allPass = true;
   for(const prm of p.parameters){
     const v = b.results[prm.name];
     if(v===undefined||v===''){ allHave=false; continue; }
-    if(!(v>=prm.min && v<=prm.max)) allPass=false;
+    if(prm.type === "numeric"){
+      if(!(v>=prm.min && v<=prm.max)) allPass=false;
+    } else if(prm.type === "sensory"){
+      if(prm.stdText && v !== prm.stdText) allPass=false;
+    }
   }
   if(!allHave) return {pass:0, fail:0, status:'partial'};
   return allPass?{pass:1, fail:0, status:'pass'}:{pass:0, fail:1, status:'fail'};
-}
-
-function exportBatchJSON(productId, batchId){
-  const p = DB.products.find(x=>x.id===productId); if(!p) return;
-  const b = p.batches.find(x=>x.id===batchId); if(!b) return;
-
-  const status = batchStatus(p,b).status;
-  const rows = [];
-  for(const prm of p.parameters){
-    const res = (b.results[prm.name]!==undefined && b.results[prm.name]!=='' ) ? b.results[prm.name] : '';
-    const remark = (res==='') ? '' : ((res>=prm.min && res<=prm.max)?'Pass':'Fail');
-    rows.push({
-      parameter: prm.name,
-      std_min: prm.min,
-      std_max: prm.max,
-      unit: prm.unit || '',
-      result: res,
-      remark
-    });
-  }
-
-  const payload = {
-    exported_at: new Date().toISOString(),
-    product: { id: p.id, name: p.name },
-    batch: {
-      id: b.id,
-      batch_no: b.batch,
-      production_date: b.date,
-      analysis_date: b.analysisDate,
-      disposition: b.remarks,
-      analyst: b.analyst,
-      signature_base64: b.signature,
-      created_at: b.createdAt
-    },
-    summary_status: status,
-    parameters: rows
-  };
-
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'});
-  const a = document.createElement('a');
-  const fname = `batch_${sanitizeFileName(p.name)}_${sanitizeFileName(b.batch)}.json`;
-  a.href = URL.createObjectURL(blob);
-  a.download = fname;
-  a.click();
-  URL.revokeObjectURL(a.href);
-  log('pass', `Exported ${fname}`);
 }
 
 // ---------------- Rendering ----------------
@@ -224,22 +191,18 @@ function renderAll(){
   document.getElementById('generatedTime').textContent = now();
 }
 
-function productBatchPassFail(p,b){
-  return batchStatus(p,b);
-}
-
 function renderDashboard(){
   const products = DB.products;
   const metricProducts = products.length;
   const metricParams = products.reduce((a,p)=>a+p.parameters.length,0);
   const metricBatches = products.reduce((a,p)=>a+p.batches.length,0);
   let pass=0, fail=0;
-  const perDay = {}; // date => {count, pass, fail}
+  const perDay = {};
   for(const p of products){
     for(const b of p.batches){
-      const stat = productBatchPassFail(p,b); pass+=stat.pass; fail+=stat.fail;
+      const stat = batchStatus(p,b); pass+=stat.pass; fail+=stat.fail;
       const d = b.date||'Unspecified';
-      if(!perDay[d]) perDay[d]={count:0, pass:0, fail:0};
+      if(!perDay[d]) perDay[d] = {count:0, pass:0, fail:0};
       perDay[d].count += 1;
       perDay[d].pass += stat.pass;
       perDay[d].fail += stat.fail;
@@ -250,70 +213,90 @@ function renderDashboard(){
   document.getElementById('metricBatches').textContent = metricBatches;
   document.getElementById('metricPassFail').textContent = `${pass} / ${fail}`;
 
-  // Build table
   const wrap = document.getElementById('dailyTableWrap');
   const days = Object.keys(perDay).sort();
   if(!days.length){ wrap.innerHTML = '<div class="text-sm text-gray-500">No data yet.</div>'; return; }
   let html = '<table class="w-full border mt-2"><thead><tr class="bg-gray-100">'+
              '<th class="p-2 border">Date</th><th class="p-2 border">Samples</th><th class="p-2 border">Pass</th><th class="p-2 border">Fail</th></tr></thead><tbody>';
-  for(const d of days){ const r=perDay[d]; html += `<tr><td class="p-2 border">${d}</td><td class="p-2 border text-center">${r.count}</td><td class="p-2 border text-green-700 text-center">${r.pass}</td><td class="p-2 border text-red-600 text-center">${r.fail}</td></tr>`; }
+  for(const d of days){ const r = perDay[d]; html += `<tr><td class="p-2 border">${d}</td><td class="p-2 border text-center">${r.count}</td><td class="p-2 border text-green-700 text-center">${r.pass}</td><td class="p-2 border text-red-600 text-center">${r.fail}</td></tr>`; }
   html += '</tbody></table>';
   wrap.innerHTML = html;
 }
 
 function renderProducts(){
-  const q = document.getElementById('search').value?.trim().toLowerCase()||'';
-  const wrap = document.getElementById('productsWrap'); wrap.innerHTML='';
+  const q = document.getElementById('search').value?.trim().toLowerCase() || '';
+  const wrap = document.getElementById('productsWrap'); wrap.innerHTML = '';
   for(const p of DB.products){
     const match = !q || p.name.toLowerCase().includes(q) || p.parameters.some(x=>x.name.toLowerCase().includes(q));
     if(!match) continue;
-    const passCnt = p.batches.reduce((a,b)=>a+productBatchPassFail(p,b).pass,0);
-    const failCnt = p.batches.reduce((a,b)=>a+productBatchPassFail(p,b).fail,0);
+    const passCnt = p.batches.reduce((a,b)=>a+batchStatus(p,b).pass,0);
+    const failCnt = p.batches.reduce((a,b)=>a+batchStatus(p,b).fail,0);
 
-    const det = document.createElement('details'); det.open = true; det.className='bg-white rounded-xl shadow p-4';
+    const det = document.createElement('details'); det.open = true; det.className = 'bg-white rounded-xl shadow p-4';
     const sum = document.createElement('summary');
-    sum.innerHTML = `<div class="flex items-center justify-between">`
-      + `<div><span class="font-semibold text-lg">${p.name}</span> <span class="text-sm text-gray-500">(${p.parameters.length} params)</span></div>`
-      + `<div class="text-sm">Pass: <span class="text-green-700 font-semibold">${passCnt}</span> / Fail: <span class="text-red-600 font-semibold">${failCnt}</span>`
-      + ` <button class='ml-3 px-2 py-1 bg-blue-600 text-white rounded text-xs' onclick="event.preventDefault(); addParameter('${p.id}')">Add Parameter</button>`
-      + ` <button class='ml-2 px-2 py-1 bg-indigo-600 text-white rounded text-xs' onclick="event.preventDefault(); addBatch('${p.id}')">Add Batch</button>`
-      + `</div></div>`;
+    sum.innerHTML = `<div class="flex items-center justify-between">
+      <div><span class="font-semibold text-lg">${p.name}</span> <span class="text-sm text-gray-500">(${p.parameters.length} params)</span></div>
+      <div class="text-sm">Pass: <span class="text-green-700 font-semibold">${passCnt}</span> / Fail: <span class="text-red-600 font-semibold">${failCnt}</span>
+        <button class='ml-3 px-2 py-1 bg-blue-600 text-white rounded text-xs' onclick="event.preventDefault(); addParameter('${p.id}')">Add Numeric Parameter</button>
+        <button class='ml-2 px-2 py-1 bg-purple-600 text-white rounded text-xs' onclick="event.preventDefault(); addSensoryParameter('${p.id}')">Add Sensory Parameter</button>
+        <button class='ml-2 px-2 py-1 bg-indigo-600 text-white rounded text-xs' onclick="event.preventDefault(); addBatch('${p.id}')">Add Batch</button>
+      </div></div>`;
     det.appendChild(sum);
 
     // Parameters table
     const paramTbl = document.createElement('div');
-    let phtml = '<div class="mt-3"><div class="text-sm text-gray-500">Specifications</div>'+
-      '<table class="w-full border mt-1"><thead><tr class="bg-gray-100">'+
-      '<th class="p-2 border">Parameter</th><th class="p-2 border">Std Min</th><th class="p-2 border">Std Max</th><th class="p-2 border">Unit</th></tr></thead><tbody>'; 
-    for(const prm of p.parameters){ phtml += `<tr><td class="p-2 border">${prm.name}</td><td class="p-2 border text-center">${prm.min}</td><td class="p-2 border text-center">${prm.max}</td><td class="p-2 border text-center">${prm.unit||''}</td></tr>`; }
+    let phtml = '<div class="mt-3"><div class="text-sm text-gray-500">Specifications</div>' +
+      '<table class="w-full border mt-1"><thead><tr class="bg-gray-100">' +
+      '<th class="p-2 border">Parameter</th><th class="p-2 border">Type</th><th class="p-2 border">Standard / Range</th><th class="p-2 border">Unit</th></tr></thead><tbody>';
+    for(const prm of p.parameters){
+      if(prm.type === "numeric"){
+        phtml += `<tr><td class="p-2 border">${prm.name}</td><td class="p-2 border">Numeric</td><td class="p-2 border text-center">${prm.min} – ${prm.max}</td><td class="p-2 border text-center">${prm.unit||''}</td></tr>`;
+      } else {
+        phtml += `<tr><td class="p-2 border">${prm.name}</td><td class="p-2 border">Sensory</td><td class="p-2 border text-center">${prm.stdText||'-'}</td><td class="p-2 border text-center">-</td></tr>`;
+      }
+    }
     phtml += '</tbody></table></div>';
     paramTbl.innerHTML = phtml; det.appendChild(paramTbl);
 
     // Batches
     for(const b of p.batches){
-      const card = document.createElement('div'); card.className='mt-4 p-3 border rounded';
+      const card = document.createElement('div'); card.className = 'mt-4 p-3 border rounded';
       card.innerHTML = `<div class='flex items-center justify-between'>
         <div class='font-medium'>Batch <span class='font-semibold'>${b.batch}</span> — Production Date: <span class='text-gray-700'>${b.date}</span> — Analysis Date: <span class='text-gray-700'>${b.analysisDate||'-'}</span> — Analyst: <span class='text-gray-700'>${b.analyst||'-'}</span></div>
-        <div class='text-sm'>Status: ${(()=>{const s=productBatchPassFail(p,b).status; return s==='pass'?'<span class=\'text-green-700 font-semibold\'>PASS</span>':(s==='fail'?'<span class=\'text-red-600 font-semibold\'>FAIL</span>':(s==='partial'?'<span class=\'text-yellow-600 font-semibold\'>PARTIAL</span>':'—'));})()}</div>
+        <div class='text-sm'>Status: ${(()=>{const s=batchStatus(p,b).status; return s==='pass'?'<span class="text-green-700 font-semibold">PASS</span>':(s==='fail'?'<span class="text-red-600 font-semibold">FAIL</span>':(s==='partial'?'<span class="text-yellow-600 font-semibold">PARTIAL</span>':'—'));})()}</div>
       </div>`;
 
       // Results table
-      let rhtml = '<table class="w-full border mt-2"><thead><tr class="bg-gray-100">'+
-                  '<th class="p-2 border">Parameter</th><th class="p-2 border">Std Range</th><th class="p-2 border">Result</th><th class="p-2 border">Remarks</th></tr></thead><tbody>';
+      let rhtml = '<table class="w-full border mt-2"><thead><tr class="bg-gray-100">' +
+                  '<th class="p-2 border">Parameter</th><th class="p-2 border">Standard / Range</th><th class="p-2 border">Result</th><th class="p-2 border">Remarks</th></tr></thead><tbody>';
       for(const prm of p.parameters){
         const res = (b.results[prm.name]!==undefined && b.results[prm.name]!=='' ) ? b.results[prm.name] : '';
         let remark = '';
-        if(res!=='') remark = (res>=prm.min && res<=prm.max) ? '<span class="text-green-700 font-semibold">✔ Pass</span>' : '<span class="text-red-600 font-semibold">⚠ Fail</span>';
-        rhtml += `<tr>
-          <td class='p-2 border'>${prm.name}</td>
-          <td class='p-2 border text-center'>${prm.min} – ${prm.max} ${prm.unit||''}</td>
-          <td class='p-2 border text-center'><input type='number' step='any' class='border rounded p-1 w-40' value='${res}' onchange="setResult('${p.id}','${b.id}','${prm.id}',this.value)"></td>
-          <td class='p-2 border text-center'>${remark}</td>
-        </tr>`;
+        if(prm.type === "numeric"){
+          if(res!=='') remark = (res>=prm.min && res<=prm.max) ? '<span class="text-green-700 font-semibold">✔ Pass</span>' : '<span class="text-red-600 font-semibold">⚠ Fail</span>';
+          rhtml += `<tr>
+            <td class='p-2 border'>${prm.name}</td>
+            <td class='p-2 border text-center'>${prm.min} – ${prm.max} ${prm.unit||''}</td>
+            <td class='p-2 border text-center'><input type='number' step='any' class='border rounded p-1 w-40' value='${res}' onchange="setResult('${p.id}','${b.id}','${prm.id}',this.value)"></td>
+            <td class='p-2 border text-center'>${remark}</td>
+          </tr>`;
+        } else {
+          // sensory
+          const std = prm.stdText || '';
+          if(res!==''){
+            remark = (std && res === std) ? '<span class="text-green-700 font-semibold">✔ Pass</span>' : '<span class="text-red-600 font-semibold">⚠ Fail</span>';
+          }
+          rhtml += `<tr>
+            <td class='p-2 border'>${prm.name}</td>
+            <td class='p-2 border text-center'>${std||'N/A'}</td>
+            <td class='p-2 border text-center'><input type='text' class='border rounded p-1 w-40' value='${escapeHtml(res)}' onchange="setResult('${p.id}','${b.id}','${prm.id}',this.value)"></td>
+            <td class='p-2 border text-center'>${remark}</td>
+          </tr>`;
+        }
       }
       rhtml += '</tbody></table>';
 
-      // Signature + Batch actions
+      // signature + export
       rhtml += `<div class='mt-3 flex items-center gap-3 flex-wrap'>
         <div class='text-sm text-gray-600'>Analyst Signature (optional):</div>
         <label class='px-2 py-1 bg-gray-200 rounded cursor-pointer'>Upload<input type='file' accept='image/*' class='hidden' onchange="uploadSignature('${p.id}','${b.id}',this.files[0])"></label>
@@ -322,11 +305,18 @@ function renderProducts(){
       </div>`;
 
       card.innerHTML += `<div class='mt-1 text-sm text-gray-600'>Remarks: ${b.remarks||'-'}</div>`;
-      card.innerHTML += rhtml; det.appendChild(card);
+      card.innerHTML += rhtml;
+      det.appendChild(card);
     }
 
     wrap.appendChild(det);
   }
+}
+
+// small helper to escape html for inputs
+function escapeHtml(s){
+  if(s==null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ---------------- Export / Import ----------------
@@ -337,8 +327,11 @@ function exportExcel(){
     for(const b of p.batches){
       for(const prm of p.parameters){
         const res = b.results[prm.name];
-        const remark = (res===undefined||res==='')?'' : ((res>=prm.min && res<=prm.max)?'Pass':'Fail');
-        rows.push({ Product:p.name, Batch:b.batch, Production_Date:b.date, Analysis_Date:b.analysisDate, Analyst:b.analyst, Parameter:prm.name, Std_Min:prm.min, Std_Max:prm.max, Unit:prm.unit||'', Result:res??'', Remarks:remark, Disposition:b.remarks||'' });
+        let remark = '';
+        if(res===undefined||res==='') remark='';
+        else if(prm.type === "numeric") remark = (res>=prm.min && res<=prm.max)?'Pass':'Fail';
+        else if(prm.type === "sensory") remark = (prm.stdText && res === prm.stdText)?'Pass':'Fail';
+        rows.push({ Product:p.name, Batch:b.batch, Production_Date:b.date, Analysis_Date:b.analysisDate, Analyst:b.analyst, Parameter:prm.name, Type:prm.type, Standard: (prm.type==='numeric'?`${prm.min}-${prm.max}`:prm.stdText||''), Unit:prm.unit||'', Result:res??'', Remarks:remark, Disposition:b.remarks||'' });
       }
     }
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -375,7 +368,6 @@ function importJSONFile(file){
   reader.readAsText(file);
 }
 
-// ---------------- New: Reset DB ----------------
 function resetDB(){
   if(!confirm('This will clear all products, batches, results, and audit logs. Continue?')) return;
   DB = { products: [], audit: [] };
@@ -384,15 +376,55 @@ function resetDB(){
   log('info','Database reset to empty state.');
 }
 
+// Export single batch (JSON)
+function exportBatchJSON(productId, batchId){
+  const p = DB.products.find(x=>x.id===productId); if(!p) return;
+  const b = p.batches.find(x=>x.id===batchId); if(!b) return;
+  const status = batchStatus(p,b).status;
+  const rows = [];
+  for(const prm of p.parameters){
+    const res = (b.results[prm.name]!==undefined && b.results[prm.name]!=='') ? b.results[prm.name] : '';
+    const remark = (res==='') ? '' : (prm.type==='numeric' ? ((res>=prm.min && res<=prm.max)?'Pass':'Fail') : (prm.stdText && res===prm.stdText ? 'Pass':'Fail'));
+    rows.push({
+      parameter: prm.name,
+      type: prm.type,
+      standard: prm.type==='numeric' ? { min:prm.min, max:prm.max, unit:prm.unit||'' } : { text: prm.stdText||'' },
+      result: res,
+      remark
+    });
+  }
+  const payload = {
+    exported_at: new Date().toISOString(),
+    product: { id: p.id, name: p.name },
+    batch: {
+      id: b.id,
+      batch_no: b.batch,
+      production_date: b.date,
+      analysis_date: b.analysisDate,
+      disposition: b.remarks,
+      analyst: b.analyst,
+      signature_base64: b.signature,
+      created_at: b.createdAt
+    },
+    summary_status: status,
+    parameters: rows
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  const fname = `batch_${sanitizeFileName(p.name)}_${sanitizeFileName(b.batch)}.json`;
+  a.href = URL.createObjectURL(blob); a.download = fname; a.click(); URL.revokeObjectURL(a.href);
+  log('pass', `Exported ${fname}`);
+}
+
 // ---------------- Events ----------------
- document.getElementById('btnAddProduct').addEventListener('click', addProduct);
- document.getElementById('btnRefresh').addEventListener('click', renderAll);
- document.getElementById('btnExportDB').addEventListener('click', exportExcel);
- document.getElementById('btnExportJSON').addEventListener('click', exportJSON);
- document.getElementById('btnExportAudit').addEventListener('click', exportAudit);
- document.getElementById('btnReset').addEventListener('click', resetDB);
- document.getElementById('importJSON').addEventListener('change', (e)=>{ const f=e.target.files[0]; if(f) importJSONFile(f); e.target.value=''; });
- document.getElementById('search').addEventListener('input', renderProducts);
+document.getElementById('btnAddProduct').addEventListener('click', addProduct);
+document.getElementById('btnRefresh').addEventListener('click', renderAll);
+document.getElementById('btnExportDB').addEventListener('click', exportExcel);
+document.getElementById('btnExportJSON').addEventListener('click', exportJSON);
+document.getElementById('btnExportAudit').addEventListener('click', exportAudit);
+document.getElementById('btnReset').addEventListener('click', resetDB);
+document.getElementById('importJSON').addEventListener('change', (e)=>{ const f=e.target.files[0]; if(f) importJSONFile(f); e.target.value=''; });
+document.getElementById('search').addEventListener('input', renderProducts);
 
 // ---------------- Init ----------------
 renderAll();
